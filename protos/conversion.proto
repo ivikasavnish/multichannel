@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package conversion;
+option go_package = "multichannel/conversion";
+// Message for HTTP request
+message HttpRequest {
+string method = 1;
+string url = 2;
+map<string, string> headers = 3;
+bytes body = 4;
+}
+
+// Message for HTTP response
+message HttpResponse {
+int32 status_code = 1;
+map<string, string> headers = 2;
+bytes body = 3;
+}
+
+// Message for TCP data
+message TcpData {
+bytes data = 1;
+}
