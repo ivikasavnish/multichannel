@@ -1,16 +1,19 @@
 package main
 
+var (
+	tcpmanager  = NewTCPManager()
+	serverblock = &ServerBlock{
+		Host:       "localhost",
+		HTTP:       8080,
+		TCP:        8081,
+		TCPManager: tcpmanager,
+	}
+)
 
 func main() {
-	serverblock := ServerBlock{
-		Host: "localhost",
-		HTTP: 8080,
-		TCP: 8081,
-	}
-	serverblock.TCPListen()
-	serverblock.HTTPListen()
+	go serverblock.HttpListen()
+	go serverblock.TCPListen()
+
 	select {}
 
 }
-
-
