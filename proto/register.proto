@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package register;
+option go_package = "multichannel/proto";
+
+service RegisterService {
+  rpc Register(RegisterRequest) returns (RegisterResponse) {}
+  rpc RegisterPath(RegisterPathRequest) returns (RegisterPathResponse) {}
+}
+
+message RegisterRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+}
+
+message RegisterResponse {
+  bool success = 1;
+  string message = 2;
+  string user_id = 3;
+}
+
+message RegisterPathRequest {
+  string client_id = 1;
+  repeated string paths = 2;
+}
+
+message RegisterPathResponse {
+  bool success = 1;
+  string message = 2;
+  repeated string registered_paths = 3;
+}

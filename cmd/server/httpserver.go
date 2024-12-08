@@ -2,12 +2,31 @@ package main
 
 import (
 	"encoding/json"
+	"io/ioutil"
 	"log"
+	"multichannel/cmd/typedefs"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
+func extractHeaders(r *http.Request) map[string]string {
+	headers := make(map[string]string)
+	for key, value := range r.Header {
+		headers[key] = value[0]
+	}
+	return headers
+}
+
+func GetRequestBody(r *http.Request) ([]byte, error) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Body.Close()
+	return body, nil
+}
 func WildRoute(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/" {
 		// Handle the request for the root path
@@ -28,7 +47,20 @@ func WildRoute(w http.ResponseWriter, r *http.Request) {
 		conn, exists := instance.InvertedMap["/"+path]
 		if exists {
 			log.Println("Found connection", conn)
-			(*conn).Write([]byte("request received" + r.URL.Path))
+			atomic.AddInt32(&requestid, 1)
+			body, _ := GetRequestBody(r)
+
+			input := typedefs.TcpInput{
+				RequestID: requestid,
+				Sub:       "REQUEST",
+				Headers:   extractHeaders(r),
+				Body:      body,
+			}
+			jsonData, err := json.Marshal(input)
+			if err != nil {
+				log.Println("Error marshalling JSON:", err)
+			}
+			(*conn).Write(jsonData)
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte("Path not found"))
@@ -54,7 +86,7 @@ func Clients(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(serverblock.TCPManager.Clients)
 }
 
-func (s *ServerBlock) HttpListen() {
+func (s *ServerBlock) HttpListen() error {
 	log.Println("Starting HTTP server on", s.Host+":"+strconv.Itoa(s.HTTP))
 	http.HandleFunc("/register", Register)
 	http.HandleFunc("/healthz", HealthCheck)
@@ -69,7 +101,7 @@ func (s *ServerBlock) HttpListen() {
 	err := http.ListenAndServe(s.Host+":"+strconv.Itoa(s.HTTP), nil)
 	if err != nil {
 		log.Println(err)
-		return
+		return err
 	}
-
+	return nil
 }

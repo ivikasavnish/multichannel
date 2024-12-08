@@ -7,20 +7,24 @@ import (
 	"github.com/google/uuid"
 	"io"
 	"log"
+	"multichannel/cmd/callbacks"
 	"multichannel/cmd/messages"
 	conversion "multichannel/cmd/protos"
 	"multichannel/cmd/typedefs"
+	grpcclient "multichannel/grpc/client"
 	"net"
 	"net/http"
 	"time"
 )
 
 type ClientBlock struct {
-	Host     string
-	HTTP     int
-	TCP      int
-	Paths    []string
-	ClientId string
+	Host            string
+	HTTP            int
+	TCP             int
+	GRPC            int
+	Paths           []string
+	ClientId        string
+	callbackRegistry *callbacks.CallbackRegistry
 }
 
 var (
@@ -66,24 +70,25 @@ func (b *ClientBlock) Register() {
 	if err != nil {
 		return
 	}
-	b.TCP = response.TcpPort
-
 }
 
 func (b *ClientBlock) TcpConnect() {
-	address := fmt.Sprintf("%s:%d", b.Host, b.TCP)
+	log.Printf("Attempting to connect to TCP server with port: %d at line 77", b.TCP)
+	address := fmt.Sprintf("127.0.0.1:%d", b.TCP)
+	log.Printf("Using address: %s at line 79", address)
 	var conn net.Conn
 	var err error
 
 	// Function to establish a connection
 	connect := func() {
 		for {
-			conn, err = net.Dial("tcp", address)
+			log.Printf("Dialing TCP4 at address: %s at line 85", address)
+			conn, err = net.Dial("tcp4", address)
 			if err == nil {
-				fmt.Println("Connected to TCP server at", address)
+				log.Printf("Successfully connected to TCP server at %s at line 88", address)
 				break
 			}
-			fmt.Println("Error connecting to TCP server:", err)
+			log.Printf("Error connecting to TCP server: %v at line 91", err)
 			time.Sleep(5 * time.Second) // Wait before retrying
 		}
 	}
@@ -92,60 +97,79 @@ func (b *ClientBlock) TcpConnect() {
 	connect()
 	defer conn.Close()
 
-	// Heartbeat ticker
-	heartbeatTicker := time.NewTicker(5 * time.Second)
-	defer heartbeatTicker.Stop()
+	// Send registration message
+	b.Reg(&conn)
 
-	go func() {
-		b.Reg(&conn)
-
-	}()
-
-	// Example of sending and receiving multiple messages
+	// Handle server responses
+	decoder := json.NewDecoder(conn)
 	for {
-		select {
-
-		default:
-			// Read the response
-			buffer := make([]byte, 1024)
-			n, err := conn.Read(buffer)
-			if err != nil {
-				if err == io.EOF {
-					fmt.Println("Connection closed by server")
-					conn.Close()
-					connect() // Reconnect
-					continue
-				}
-				fmt.Println("Error reading from TCP server:", err)
+		var response typedefs.TcpMessage
+		if err := decoder.Decode(&response); err != nil {
+			if err == io.EOF {
+				log.Printf("Connection closed by server at line 109")
 				conn.Close()
 				connect() // Reconnect
 				continue
 			}
+			log.Printf("Error reading from server: %v at line 114", err)
+			conn.Close()
+			connect() // Reconnect
+			continue
+		}
 
-			fmt.Println("Received from server:", string(buffer[:n]))
-
-			b.TcpSend(&conn)
+		log.Printf("Client received message type: %s at line 120", response.Sub)
+		switch response.Sub {
+		case "REG_RESPONSE":
+			log.Printf("Registration response: %v at line 123", response.Msg)
+		default:
+			log.Printf("Unknown response type: %s at line 125", response.Sub)
 		}
 	}
 }
 
-func (b *ClientBlock) Process() {
-
+func (b *ClientBlock) HandleStockUpdate(symbol string, price float64) {
+	log.Printf("Stock Update: %s is now $%.2f", symbol, price)
 }
 
-func main() {
-	newClientBlock := &ClientBlock{
-		Host:  "localhost",
-		HTTP:  8080,
-		TCP:   8081,
-		Paths: []string{"/stocks", "/weather", "/crypto"},
+func (b *ClientBlock) HandleWeatherUpdate(location string, temperature float64) {
+	log.Printf("Weather Update: %s is now %.1f°C", location, temperature)
+}
+
+func (b *ClientBlock) HandleCryptoUpdate(coin string, price float64) {
+	log.Printf("Crypto Update: %s is now $%.2f", coin, price)
+}
+
+func (b *ClientBlock) Process() {
+	msg := typedefs.TcpMessage{}
+	msg.Msg = json.RawMessage{}
+	
+	// Process the message based on its type
+	if msg.Sub != "" {
+		results, err := b.callbackRegistry.Execute(msg.Sub, msg.Msg)
+		if err != nil {
+			log.Printf("Error executing callback for %s: %v", msg.Sub, err)
+			return
+		}
+		log.Printf("Callback results: %v", results)
+	}
+}
+
+func (b *ClientBlock) RegisterGRPC() error {
+	grpcClient, err := grpcclient.NewRegisterClient(fmt.Sprintf("%s:%d", b.Host, b.GRPC))
+	if err != nil {
+		return fmt.Errorf("failed to create gRPC client: %v", err)
 	}
 
-	newClientBlock.Register()
-	newClientBlock.TcpConnect()
-	newClientBlock.Process()
+	resp, err := grpcClient.Register(b.ClientId, "test@example.com", "password123")
+	if err != nil {
+		return fmt.Errorf("failed to register via gRPC: %v", err)
+	}
 
+	log.Printf("GRPC Registration response: success=%v, message=%s, userId=%s", 
+		resp.Success, resp.Message, resp.UserId)
+	return nil
 }
+
 func (b *ClientBlock) Reg(conn *net.Conn) {
 	msg := typedefs.TcpMessage{}
 	msg.Sub = "REG"
@@ -177,6 +201,7 @@ func TcpSender(bytechan chan []byte, conn *net.Conn) {
 		}
 	}
 }
+
 func (b *ClientBlock) TcpSend(conn *net.Conn) {
 	msg := typedefs.TcpMessage{}
 	msg.Sub = "RESPONSE"
@@ -195,4 +220,38 @@ func (b *ClientBlock) TcpSend(conn *net.Conn) {
 	if err != nil {
 		fmt.Println("Error writing to TCP server:", err)
 	}
+}
+
+func main() {
+	block := &ClientBlock{
+		Host: "localhost",
+		HTTP: 8080,
+		TCP:  8081,  // Updated to match server's TCP port
+		GRPC: 50051,
+		Paths: []string{
+			"/stocks",
+			"/weather",
+			"/crypto",
+		},
+		callbackRegistry: callbacks.NewCallbackRegistry(),
+	}
+
+	log.Printf("Initialized client block with TCP port: %d", block.TCP)
+
+	// Register callback functions
+	block.callbackRegistry.Register("STOCK", block.HandleStockUpdate)
+	block.callbackRegistry.Register("WEATHER", block.HandleWeatherUpdate)
+	block.callbackRegistry.Register("CRYPTO", block.HandleCryptoUpdate)
+
+	// Register using HTTP
+	block.Register()
+
+	// Register using gRPC
+	if err := block.RegisterGRPC(); err != nil {
+		log.Printf("gRPC registration failed: %v", err)
+	}
+
+	// Connect via TCP
+	block.TcpConnect()
+	block.Process()
 }
