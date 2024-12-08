@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"google.golang.org/grpc"
 	"io"
 	"log"
 	"multichannel/cmd/typedefs"
@@ -12,10 +11,12 @@ import (
 	pb "multichannel/proto"
 	"net"
 	"net/http"
+
+	"google.golang.org/grpc"
 )
 
 var (
-	tcpmanager = NewTCPManager()
+	tcpmanager  = NewTCPManager()
 	serverblock = &ServerBlock{
 		Host:       "localhost",
 		HTTP:       8080,
@@ -46,7 +47,7 @@ func (s *ServerBlock) TCPListen() {
 	log.Printf("Starting TCP server with port: %d", s.TCP)
 	address := fmt.Sprintf("127.0.0.1:%d", s.TCP)
 	log.Printf("Using server address: %s", address)
-	listener, err := net.Listen("tcp4", address)
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Printf("TCP server failed to start: %v", err)
 		return
@@ -58,14 +59,27 @@ func (s *ServerBlock) TCPListen() {
 			log.Printf("TCP connection error: %v", err)
 			continue
 		}
-		conn.Write([]byte("Connected to TCP server"))
+		// Send welcome message in JSON format
+		welcome := typedefs.TcpMessage{
+			Sub: "WELCOME",
+			Msg: "Connected to TCP server",
+		}
+		welcomeData, err := json.Marshal(welcome)
+		if err != nil {
+			log.Printf("Error marshalling welcome message: %v", err)
+			continue
+		}
+		if _, err := conn.Write(welcomeData); err != nil {
+			log.Printf("Error sending welcome message: %v", err)
+			continue
+		}
 		go handleTCPConnection(&conn)
 	}
 }
 
 func handleTCPConnection(c *net.Conn) {
 	conn := *c
-	defer conn.Close()
+	// defer conn.Close()
 	for {
 		err := handleTCPMessage(&conn)
 		if err != nil {
@@ -80,28 +94,44 @@ func handleTCPConnection(c *net.Conn) {
 }
 
 func handleTCPMessage(conn *net.Conn) error {
-	var msg typedefs.TcpMessage
-	decoder := json.NewDecoder(*conn)
-	if err := decoder.Decode(&msg); err != nil {
-		return err
-	}
+    // Create a buffer to read data
+    var fullMessage []byte
+    buf := make([]byte, 1024)
+    
+    // Read the first chunk
+    n, err := (*conn).Read(buf)
+    if err != nil {
+        return err
+    }
+    fullMessage = append(fullMessage, buf[:n]...)
 
-	log.Printf("Server received message type: %s at line 84", msg.Sub)
+    var msg typedefs.TcpMessage
+    if err := json.Unmarshal(fullMessage, &msg); err != nil {
+        log.Printf("Error unmarshalling message: %v", err)
+        return err
+    }
 
-	// Process the message based on its type
-	switch msg.Sub {
-	case "REG", "register":  // Handle both REG and register for compatibility
-		// Handle registration
-		response := typedefs.TcpMessage{
-			Sub: "REG_RESPONSE",  // Changed to be more specific
-			Msg: "Registration successful",
-		}
-		log.Printf("Server sending response type: %s at line 94", response.Sub)
-		return json.NewEncoder(*conn).Encode(response)
-	default:
-		log.Printf("Unknown message type: %s at line 97", msg.Sub)
-	}
-	return nil
+    log.Printf("Server received message type: %s", msg.Sub)
+
+    // Process the message based on its type
+    switch msg.Sub {
+    case "REG", "register": // Handle both REG and register for compatibility
+        // Handle registration
+        response := typedefs.TcpMessage{
+            Sub: "REG_RESPONSE", // Changed to be more specific
+            Msg: "Registration successful",
+        }
+        log.Printf("Server sending response type: %s", response.Sub)
+        responseData, err := json.Marshal(response)
+        if err != nil {
+            return err
+        }
+        _, err = (*conn).Write(responseData)
+        return err
+    default:
+        log.Printf("Unknown message type: %s", msg.Sub)
+    }
+    return nil
 }
 
 func main() {

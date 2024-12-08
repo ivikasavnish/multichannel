@@ -73,22 +73,22 @@ func (b *ClientBlock) Register() {
 }
 
 func (b *ClientBlock) TcpConnect() {
-	log.Printf("Attempting to connect to TCP server with port: %d at line 77", b.TCP)
+	log.Printf("Attempting to connect to TCP server with port: %d", b.TCP)
 	address := fmt.Sprintf("127.0.0.1:%d", b.TCP)
-	log.Printf("Using address: %s at line 79", address)
+	log.Printf("Using address: %s", address)
 	var conn net.Conn
 	var err error
 
 	// Function to establish a connection
 	connect := func() {
 		for {
-			log.Printf("Dialing TCP4 at address: %s at line 85", address)
+			log.Printf("Dialing TCP4 at address: %s", address)
 			conn, err = net.Dial("tcp4", address)
 			if err == nil {
-				log.Printf("Successfully connected to TCP server at %s at line 88", address)
+				log.Printf("Successfully connected to TCP server at %s", address)
 				break
 			}
-			log.Printf("Error connecting to TCP server: %v at line 91", err)
+			log.Printf("Error connecting to TCP server: %v", err)
 			time.Sleep(5 * time.Second) // Wait before retrying
 		}
 	}
@@ -97,32 +97,40 @@ func (b *ClientBlock) TcpConnect() {
 	connect()
 	defer conn.Close()
 
+	// Read welcome message
+	var welcome typedefs.TcpMessage
+	decoder := json.NewDecoder(conn)
+	if err := decoder.Decode(&welcome); err != nil {
+		log.Printf("Error reading welcome message: %v", err)
+		return
+	}
+	log.Printf("Received welcome message: %s - %v", welcome.Sub, welcome.Msg)
+
 	// Send registration message
 	b.Reg(&conn)
 
 	// Handle server responses
-	decoder := json.NewDecoder(conn)
 	for {
 		var response typedefs.TcpMessage
 		if err := decoder.Decode(&response); err != nil {
 			if err == io.EOF {
-				log.Printf("Connection closed by server at line 109")
+				log.Printf("Connection closed by server")
 				conn.Close()
 				connect() // Reconnect
 				continue
 			}
-			log.Printf("Error reading from server: %v at line 114", err)
+			log.Printf("Error reading from server: %v", err)
 			conn.Close()
 			connect() // Reconnect
 			continue
 		}
 
-		log.Printf("Client received message type: %s at line 120", response.Sub)
+		log.Printf("Client received message type: %s", response.Sub)
 		switch response.Sub {
 		case "REG_RESPONSE":
-			log.Printf("Registration response: %v at line 123", response.Msg)
+			log.Printf("Registration response: %v", response.Msg)
 		default:
-			log.Printf("Unknown response type: %s at line 125", response.Sub)
+			log.Printf("Unknown response type: %s", response.Sub)
 		}
 	}
 }
@@ -171,23 +179,26 @@ func (b *ClientBlock) RegisterGRPC() error {
 }
 
 func (b *ClientBlock) Reg(conn *net.Conn) {
-	msg := typedefs.TcpMessage{}
-	msg.Sub = "REG"
-	msg.Msg = messages.RegisterRequest{
-		ClientId: b.ClientId,
-		Paths:    b.Paths,
-	}
-	//msg.Msg = []byte(fmt.Sprintf("Client %s is alive at %s", b.ClientId, time.Now().String()))
-	jsonData, err := json.Marshal(msg)
-	if err != nil {
-		fmt.Println("Error marshalling JSON:", err)
-	}
-	//jsonMessage := append(jsonData, '\n')
-	_, err = (*conn).Write(jsonData)
-	if err != nil {
-		fmt.Println("Error writing to TCP server:", err)
-	}
-
+    msg := typedefs.TcpMessage{
+        Sub: "REG",
+        Msg: map[string]interface{}{
+            "client_id": b.ClientId,
+            "Paths":    b.Paths,
+        },
+    }
+    
+    jsonData, err := json.Marshal(msg)
+    if err != nil {
+        log.Printf("Error marshalling JSON: %v", err)
+        return
+    }
+    
+    log.Printf("Sending registration message: %s", string(jsonData))
+    _, err = (*conn).Write(jsonData)
+    if err != nil {
+        log.Printf("Error writing to TCP server: %v", err)
+        return
+    }
 }
 
 func TcpSender(bytechan chan []byte, conn *net.Conn) {
