@@ -65,3 +65,4 @@ func (r *CallbackRegistry) GetRegisteredCallbacks() []string {
 	}
 	return names
 }
+

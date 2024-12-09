@@ -18,12 +18,12 @@ import (
 )
 
 type ClientBlock struct {
-	Host            string
-	HTTP            int
-	TCP             int
-	GRPC            int
-	Paths           []string
-	ClientId        string
+	Host             string
+	HTTP             int
+	TCP              int
+	GRPC             int
+	Paths            []string
+	ClientId         string
 	callbackRegistry *callbacks.CallbackRegistry
 }
 
@@ -33,6 +33,7 @@ var (
 
 func init() {
 	log.SetFlags(log.LstdFlags | log.Llongfile)
+
 }
 
 func (b *ClientBlock) Register() {
@@ -127,8 +128,43 @@ func (b *ClientBlock) TcpConnect() {
 
 		log.Printf("Client received message type: %s", response.Sub)
 		switch response.Sub {
-		case "REG_RESPONSE":
+		case "REQUEST":
 			log.Printf("Registration response: %v", response.Msg)
+
+			result, err := b.callbackRegistry.Execute("REG", response.Msg)
+			if err != nil {
+				respMsg := typedefs.TcpMessage{
+					Sub: "ERROR",
+					Msg: err,
+				}
+				jsonData, err := json.Marshal(respMsg)
+				if err != nil {
+					log.Printf("Error marshalling JSON: %v", err)
+					return
+				}
+				_, err = conn.Write(jsonData)
+				if err != nil {
+					log.Printf("Error writing to TCP server: %v", err)
+					return
+				}
+			}
+			respmsg := typedefs.TcpMessage{
+				Sub: "RESPONSE",
+				Msg: result,
+			}
+			jsonData, err := json.Marshal(respmsg)
+			if err != nil {
+				log.Printf("Error marshalling JSON: %v", err)
+				return
+			}
+			_, err = conn.Write(jsonData)
+			if err != nil {
+				log.Printf("Error writing to TCP server: %v", err)
+				return
+
+			}
+		case "TASK":
+			log.Printf("Received task: %v", response.Msg)
 		default:
 			log.Printf("Unknown response type: %s", response.Sub)
 		}
@@ -150,7 +186,7 @@ func (b *ClientBlock) HandleCryptoUpdate(coin string, price float64) {
 func (b *ClientBlock) Process() {
 	msg := typedefs.TcpMessage{}
 	msg.Msg = json.RawMessage{}
-	
+
 	// Process the message based on its type
 	if msg.Sub != "" {
 		results, err := b.callbackRegistry.Execute(msg.Sub, msg.Msg)
@@ -173,32 +209,32 @@ func (b *ClientBlock) RegisterGRPC() error {
 		return fmt.Errorf("failed to register via gRPC: %v", err)
 	}
 
-	log.Printf("GRPC Registration response: success=%v, message=%s, userId=%s", 
+	log.Printf("GRPC Registration response: success=%v, message=%s, userId=%s",
 		resp.Success, resp.Message, resp.UserId)
 	return nil
 }
 
 func (b *ClientBlock) Reg(conn *net.Conn) {
-    msg := typedefs.TcpMessage{
-        Sub: "REG",
-        Msg: map[string]interface{}{
-            "client_id": b.ClientId,
-            "Paths":    b.Paths,
-        },
-    }
-    
-    jsonData, err := json.Marshal(msg)
-    if err != nil {
-        log.Printf("Error marshalling JSON: %v", err)
-        return
-    }
-    
-    log.Printf("Sending registration message: %s", string(jsonData))
-    _, err = (*conn).Write(jsonData)
-    if err != nil {
-        log.Printf("Error writing to TCP server: %v", err)
-        return
-    }
+	msg := typedefs.TcpMessage{
+		Sub: "REG",
+		Msg: map[string]interface{}{
+			"client_id": b.ClientId,
+			"Paths":     b.Paths,
+		},
+	}
+
+	jsonData, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %v", err)
+		return
+	}
+
+	log.Printf("Sending registration message: %s", string(jsonData))
+	_, err = (*conn).Write(jsonData)
+	if err != nil {
+		log.Printf("Error writing to TCP server: %v", err)
+		return
+	}
 }
 
 func TcpSender(bytechan chan []byte, conn *net.Conn) {
@@ -237,7 +273,7 @@ func main() {
 	block := &ClientBlock{
 		Host: "localhost",
 		HTTP: 8080,
-		TCP:  8081,  // Updated to match server's TCP port
+		TCP:  8081, // Updated to match server's TCP port
 		GRPC: 50051,
 		Paths: []string{
 			"/stocks",
