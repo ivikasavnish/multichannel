@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -55,30 +54,13 @@ func tcpMessageHandler(conn *net.Conn) error {
 	loc := getFileAndLine()
 	log.Printf("[%s] Handling new message from %s", loc, (*conn).RemoteAddr())
 
-	var fullMessage []byte
-	buf := make([]byte, 1024)
-
-	for {
-		n, err := (*conn).Read(buf)
-		if err != nil {
-			return err
-		}
-		fullMessage = append(fullMessage, buf[:n]...)
-		if n < len(buf) {
-			break
-		}
-	}
-
-	msg := typedefs.TcpMessage{}
-	log.Printf("[%s] Received raw message: %s", loc, string(fullMessage))
-
-	err := json.Unmarshal(fullMessage, &msg)
+	reader := typedefs.NewTcpMessageReader(*conn)
+	writer := typedefs.NewTcpMessageWriter(*conn)
+	msg, err := reader.ReadMessage()
 	if err != nil {
-		log.Printf("[%s] Error unmarshalling message: %v", loc, err)
+		log.Printf("[%s] Error reading message from %s: %v", loc, (*conn).RemoteAddr(), err)
 		return err
 	}
-
-	log.Printf("[%s] Processing message type: %s", loc, msg.Sub)
 	switch msg.Sub {
 	case "REG":
 		reg, ok := msg.Msg.(map[string]interface{})
@@ -106,10 +88,11 @@ func tcpMessageHandler(conn *net.Conn) error {
 			Sub: "REG_RESPONSE",
 			Msg: "Registration successful",
 		}
-		if err := json.NewEncoder(*conn).Encode(response); err != nil {
+		if err := writer.WriteMessage(&response); err != nil {
 			log.Printf("[%s] Error sending registration response: %v", loc, err)
 			return err
 		}
+		log.Println("Registered client with id", clientId, "messege sent to client")
 
 	case "HEARTBEAT":
 		log.Printf("[%s] Received heartbeat from %s", loc, (*conn).RemoteAddr())
@@ -117,7 +100,7 @@ func tcpMessageHandler(conn *net.Conn) error {
 			Sub: "HEARTBEAT_RESPONSE",
 			Msg: "Heartbeat acknowledged",
 		}
-		if err := json.NewEncoder(*conn).Encode(response); err != nil {
+		if err := writer.WriteMessage(&response); err != nil {
 			log.Printf("[%s] Error sending heartbeat response: %v", loc, err)
 			return err
 		}

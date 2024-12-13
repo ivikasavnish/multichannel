@@ -97,90 +97,87 @@ func (b *ClientBlock) TcpConnect() {
 	// Establish initial connection
 	connect()
 	defer conn.Close()
+	// create a reder and writer
+	reader := typedefs.NewTcpMessageReader(conn)
+	writer := typedefs.NewTcpMessageWriter(conn)
 
 	// Read welcome message
-	var welcome typedefs.TcpMessage
-	decoder := json.NewDecoder(conn)
-	if err := decoder.Decode(&welcome); err != nil {
+	welcome, err := reader.ReadMessage()
+	if err != nil {
 		log.Printf("Error reading welcome message: %v", err)
 		return
 	}
-	log.Printf("Received welcome message: %s - %v", welcome.Sub, welcome.Msg)
+	log.Printf("Received welcome message: %s - %v", welcome.Sub, string(welcome.Msg))
 
 	// Send registration message
-	b.Reg(&conn)
+	//b.Reg(&conn, writer)
 
 	// Handle server responses
 	for {
-		var response typedefs.TcpMessage
-		if err := decoder.Decode(&response); err != nil {
+		response, err := reader.ReadMessage()
+		if response == nil {
+			//log.Printf("Received nil message from server")
+			continue
+		}
+		log.Printf("Client received message type: %s", response)
+		if err != nil {
 			if err == io.EOF {
 				log.Printf("Connection closed by server")
-				conn.Close()
-				connect() // Reconnect
+				//conn.Close()
+				//connect() // Reconnect
 				continue
 			}
 			log.Printf("Error reading from server: %v", err)
-			conn.Close()
-			connect() // Reconnect
-			continue
+
 		}
 
-		log.Printf("Client received message type: %s", response.Sub)
+		//log.Printf("Client received message type: %s", response.Sub)
 		switch response.Sub {
 		case "REQUEST":
-			log.Printf("Registration response: %v", response.Msg)
-
-			result, err := b.callbackRegistry.Execute("REG", response.Msg)
+			log.Printf("HTTP response: %v", string(response.Msg))
+			var request map[string]interface{}
+			err := json.Unmarshal(response.Msg, &request)
 			if err != nil {
+				log.Printf("Error unmarshalling request: %v", err)
+				continue
+			}
+
+			requestid := int32(request["request_id"].(float64))
+
+			result, err := b.callbackRegistry.Execute(response.Sub, response.Msg)
+
+			if err != nil || result == nil {
 				respMsg := typedefs.TcpMessage{
-					Sub: "ERROR",
-					Msg: err,
+					Sub:       "ERROR",
+					Msg:       []byte(fmt.Sprintf("{\"error\": \"%v\"}", err)),
+					RequestId: requestid,
 				}
-				jsonData, err := json.Marshal(respMsg)
-				if err != nil {
-					log.Printf("Error marshalling JSON: %v", err)
-					return
-				}
-				_, err = conn.Write(jsonData)
+				err := writer.WriteMessage(&respMsg)
 				if err != nil {
 					log.Printf("Error writing to TCP server: %v", err)
-					return
+
 				}
+				log.Printf("Response sent")
+				continue
 			}
 			respmsg := typedefs.TcpMessage{
-				Sub: "RESPONSE",
-				Msg: result,
+				Sub:       "RESPONSE",
+				Msg:       result,
+				RequestId: requestid,
 			}
-			jsonData, err := json.Marshal(respmsg)
-			if err != nil {
-				log.Printf("Error marshalling JSON: %v", err)
-				return
-			}
-			_, err = conn.Write(jsonData)
+			err = writer.WriteMessage(&respmsg)
 			if err != nil {
 				log.Printf("Error writing to TCP server: %v", err)
-				return
-
 			}
+			log.Printf("Response sent")
 		case "TASK":
 			log.Printf("Received task: %v", response.Msg)
+		case "REG_RESPONSE":
+			log.Printf("Received registration response: %v", response.Msg)
 		default:
 			log.Printf("Unknown response type: %s", response.Sub)
 		}
 	}
-}
-
-func (b *ClientBlock) HandleStockUpdate(symbol string, price float64) {
-	log.Printf("Stock Update: %s is now $%.2f", symbol, price)
-}
-
-func (b *ClientBlock) HandleWeatherUpdate(location string, temperature float64) {
-	log.Printf("Weather Update: %s is now %.1f°C", location, temperature)
-}
-
-func (b *ClientBlock) HandleCryptoUpdate(coin string, price float64) {
-	log.Printf("Crypto Update: %s is now $%.2f", coin, price)
 }
 
 func (b *ClientBlock) Process() {
@@ -214,27 +211,26 @@ func (b *ClientBlock) RegisterGRPC() error {
 	return nil
 }
 
-func (b *ClientBlock) Reg(conn *net.Conn) {
-	msg := typedefs.TcpMessage{
-		Sub: "REG",
-		Msg: map[string]interface{}{
-			"client_id": b.ClientId,
-			"Paths":     b.Paths,
-		},
-	}
-
-	jsonData, err := json.Marshal(msg)
+func (b *ClientBlock) Reg(conn *net.Conn, writer *typedefs.TcpMessageWriter) {
+	payload, err := json.Marshal(map[string]interface{}{
+		"client_id": b.ClientId,
+		"Paths":     b.Paths,
+	})
 	if err != nil {
 		log.Printf("Error marshalling JSON: %v", err)
 		return
 	}
+	msg := typedefs.TcpMessage{
+		Sub: "REG",
+		Msg: payload,
+	}
 
-	log.Printf("Sending registration message: %s", string(jsonData))
-	_, err = (*conn).Write(jsonData)
+	err = writer.WriteMessage(&msg)
 	if err != nil {
-		log.Printf("Error writing to TCP server: %v", err)
+		log.Printf("Error sending registration message: %v", err)
 		return
 	}
+	log.Printf("Registration message sent")
 }
 
 func TcpSender(bytechan chan []byte, conn *net.Conn) {
@@ -256,7 +252,7 @@ func (b *ClientBlock) TcpSend(conn *net.Conn) {
 		StatusCode: 200,
 		Headers:    nil,
 		Body:       []byte("Hello World"),
-	}
+	}.ToBytes()
 	//msg.Msg = []byte(fmt.Sprintf("Client %s is alive at %s", b.ClientId, time.Now().String()))
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -286,9 +282,9 @@ func main() {
 	log.Printf("Initialized client block with TCP port: %d", block.TCP)
 
 	// Register callback functions
-	block.callbackRegistry.Register("STOCK", block.HandleStockUpdate)
-	block.callbackRegistry.Register("WEATHER", block.HandleWeatherUpdate)
-	block.callbackRegistry.Register("CRYPTO", block.HandleCryptoUpdate)
+	block.callbackRegistry.Register("/stocks", stocksCallback)
+	block.callbackRegistry.Register("/weather", weatherCallback)
+	block.callbackRegistry.Register("/crypto", cryptoCallback)
 
 	// Register using HTTP
 	block.Register()

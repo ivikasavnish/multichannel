@@ -8,6 +8,10 @@ import (
 	"runtime"
 )
 
+func init() {
+	log.SetFlags(log.LstdFlags | log.Llongfile)
+}
+
 var (
 	tcpmanager  = NewTCPManager()
 	serverblock = &ServerBlock{
@@ -43,11 +47,11 @@ func getFileAndLine() string {
 func main() {
 	// Configure logging with file and line numbers
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
-	
+
 	loc := getFileAndLine()
 	log.Printf("[%s] Starting server on %s", loc, serverblock.Host)
 	log.Printf("[%s] HTTP port: %d, TCP port: %d", loc, serverblock.HTTP, serverblock.TCP)
-	
+
 	// Start HTTP server
 	go func() {
 		if err := serverblock.HttpListen(); err != nil {
@@ -55,12 +59,12 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-	
+
 	// Start TCP server
 	go func() {
 		serverblock.TCPListen()
 	}()
-	
+
 	log.Printf("[%s] Server started successfully", loc)
 	select {} // Keep the main goroutine running
 }

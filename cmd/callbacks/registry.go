@@ -1,60 +1,52 @@
 package callbacks
 
 import (
+	"encoding/json"
 	"fmt"
-	"reflect"
+	"multichannel/cmd/typedefs"
 )
 
 // CallbackRegistry stores mapping of callback functions
 type CallbackRegistry struct {
-	callbacks map[string]interface{}
+	callbacks map[string]func(typedefs.Request) interface{}
 }
 
 // NewCallbackRegistry creates a new registry
 func NewCallbackRegistry() *CallbackRegistry {
 	return &CallbackRegistry{
-		callbacks: make(map[string]interface{}),
+		callbacks: make(map[string]func(typedefs.Request) interface{}),
 	}
-}
-
-// Register adds a callback function to the registry
-func (r *CallbackRegistry) Register(name string, callback interface{}) error {
-	if _, exists := r.callbacks[name]; exists {
-		return fmt.Errorf("callback %s already registered", name)
-	}
-	r.callbacks[name] = callback
-	return nil
 }
 
 // Execute calls the registered function by name with provided arguments
-func (r *CallbackRegistry) Execute(name string, args ...interface{}) ([]interface{}, error) {
-	callback, exists := r.callbacks[name]
+func (r *CallbackRegistry) Execute(name string, args ...interface{}) ([]byte, error) {
+	if name != "REQUEST" || len(args) != 1 {
+		return nil, fmt.Errorf("callback %s not found", name)
+	}
+	byteinput, ok := args[0].([]byte)
+	if !ok {
+		return nil, fmt.Errorf("invalid input")
+	}
+	var request typedefs.Request
+
+	err := json.Unmarshal(byteinput, &request)
+	if err != nil {
+		return nil, err
+	}
+	//return []byte(fmt.Sprintf("Received request: %v %v", request.Path, request.Method)), nil
+	callback, exists := r.callbacks[request.Path]
 	if !exists {
 		return nil, fmt.Errorf("callback %s not found", name)
 	}
 
-	// Get the function's reflect.Value
-	fn := reflect.ValueOf(callback)
-	if fn.Kind() != reflect.Func {
-		return nil, fmt.Errorf("callback %s is not a function", name)
+	result := callback(request)
+
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return nil, err
 	}
 
-	// Convert args to reflect.Value slice
-	var values []reflect.Value
-	for _, arg := range args {
-		values = append(values, reflect.ValueOf(arg))
-	}
-
-	// Call the function
-	result := fn.Call(values)
-
-	// Convert results back to interface{}
-	var returns []interface{}
-	for _, r := range result {
-		returns = append(returns, r.Interface())
-	}
-
-	return returns, nil
+	return resultBytes, nil
 }
 
 // GetRegisteredCallbacks returns all registered callback names
@@ -66,3 +58,8 @@ func (r *CallbackRegistry) GetRegisteredCallbacks() []string {
 	return names
 }
 
+// Register adds a callback function to the registry
+func (r *CallbackRegistry) Register(name string, callback func(typedefs.Request) interface{}) error {
+	r.callbacks[name] = callback
+	return nil
+}

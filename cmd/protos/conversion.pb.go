@@ -7,6 +7,7 @@
 package conversion
 
 import (
+	"encoding/json"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -154,6 +155,14 @@ func (x *HttpResponse) GetBody() []byte {
 		return x.Body
 	}
 	return nil
+}
+
+func (x HttpResponse) ToBytes() []byte {
+	b , err := json.Marshal(x)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // Message for TCP data

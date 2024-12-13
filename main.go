@@ -11,6 +11,7 @@ import (
 	pb "multichannel/proto"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	_ "sync"
 	"sync/atomic"
@@ -18,6 +19,10 @@ import (
 
 	"google.golang.org/grpc"
 )
+
+func init() {
+	log.SetFlags(log.LstdFlags | log.Llongfile)
+}
 
 var (
 	tcpmanager  = NewTCPManager()
@@ -93,17 +98,13 @@ func (s *ServerBlock) TCPListen() {
 			log.Printf("TCP connection error: %v", err)
 			continue
 		}
+		writer := typedefs.NewTcpMessageWriter(conn)
 		// Send welcome message in JSON format
 		welcome := typedefs.TcpMessage{
 			Sub: "WELCOME",
-			Msg: "Connected to TCP server",
+			Msg: []byte("Connected to TCP server"),
 		}
-		welcomeData, err := json.Marshal(welcome)
-		if err != nil {
-			log.Printf("Error marshalling welcome message: %v", err)
-			continue
-		}
-		if _, err := conn.Write(welcomeData); err != nil {
+		if err := writer.WriteMessage(&welcome); err != nil {
 			log.Printf("Error sending welcome message: %v", err)
 			continue
 		}
@@ -129,31 +130,23 @@ func handleTCPConnection(c *net.Conn) {
 
 func handleTCPMessage(conn *net.Conn) error {
 	// Create a buffer to read data
-	var fullMessage []byte
-	buf := make([]byte, 1024)
+	reader := typedefs.NewTcpMessageReader(*conn)
 
-	// Read the first chunk
-	n, err := (*conn).Read(buf)
+	msg, err := reader.ReadMessage()
 	if err != nil {
+		log.Printf("Error reading message: %v", err)
 		return err
 	}
-	fullMessage = append(fullMessage, buf[:n]...)
-
-	var msg typedefs.TcpMessage
-	if err := json.Unmarshal(fullMessage, &msg); err != nil {
-		log.Printf("Error unmarshalling message: %v", err)
-		return err
-	}
-
-	log.Printf("Server received message type: %s", msg.Sub)
 
 	switch msg.Sub {
 	case "REG", "register":
 		// Cast the message to a map
-		reg, ok := msg.Msg.(map[string]interface{})
-		if !ok {
-			log.Printf("Error casting message to RegisterRequest")
-			return nil
+
+		var reg map[string]interface{}
+		err := json.Unmarshal(msg.Msg, &reg)
+		if err != nil {
+			log.Printf("Error unmarshalling registration message: %v", err)
+			return err
 		}
 
 		clientId, ok := reg["client_id"].(string)
@@ -173,7 +166,7 @@ func handleTCPMessage(conn *net.Conn) error {
 
 		response := typedefs.TcpMessage{
 			Sub: "REG_RESPONSE",
-			Msg: "Registration successful",
+			Msg: []byte("Registration successful"),
 		}
 		if err := json.NewEncoder(*conn).Encode(response); err != nil {
 			log.Printf("Error sending registration response: %v", err)
@@ -182,25 +175,39 @@ func handleTCPMessage(conn *net.Conn) error {
 
 	case "RESPONSE":
 		// Handle response from client for HTTP request
-		resp, ok := msg.Msg.(map[string]interface{})
-		if !ok {
-			log.Printf("Error casting response message")
+		if msg.Msg == nil {
+
+			log.Printf("Error getting response message")
 			return nil
 		}
+		log.Println(reflect.TypeOf(msg.Msg).Kind().String())
 
-		requestId, ok := resp["request_id"].(float64)
-		if !ok {
-			log.Printf("Error getting request_id from response")
+		responses[int(msg.RequestId)] = &ResponseManager{
+			Requestid:  int(msg.RequestId),
+			Response:   msg.Msg,
+			StatusCode: 200,
+		}
+
+	case "ERROR":
+		log.Printf("Error message: %v", string(msg.Msg))
+		if msg.Msg == nil {
+
+			log.Printf("Error getting response message")
 			return nil
 		}
-
-		// Store the response for the HTTP handler to pick up
-		responseManager := &ResponseManager{
-			Requestid:  int(requestId),
-			Response:   []byte(fmt.Sprintf("%v", resp["body"])),
-			StatusCode: int(resp["status_code"].(float64)),
+		var resp map[string]interface{}
+		err := json.Unmarshal(msg.Msg, &resp)
+		if err != nil {
+			log.Printf("Error unmarshalling error message: %v", err)
+			return err
 		}
-		responses[int(requestId)] = responseManager
+
+		responses[int(msg.RequestId)] = &ResponseManager{
+			Requestid:  int(msg.RequestId),
+			Response:   []byte("error"),
+			StatusCode: 500,
+		}
+		log.Println(reflect.TypeOf(msg.Msg).Kind().String())
 
 	default:
 		log.Printf("Unknown message type: %s", msg.Sub)
@@ -254,27 +261,35 @@ func WildRoute(w http.ResponseWriter, r *http.Request) {
 	currentRequestId := atomic.AddInt32(&requestid, 1)
 
 	// Create TCP message
-	tcpRequest := typedefs.TcpMessage{
-		Sub: "REQUEST",
-		Msg: map[string]interface{}{
-			"request_id": currentRequestId,
-			"method":     r.Method,
-			"path":       r.URL.Path,
-			"headers":    headers,
-			"body":       string(body),
-		},
+	msg := typedefs.Request{
+		RequestId: currentRequestId,
+		Method:    r.Method,
+		Path:      r.URL.Path,
+		Headers:   headers,
+		Body:      body,
 	}
-
-	// Send request to TCP client
-	if err := json.NewEncoder(*conn).Encode(tcpRequest); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Error sending request to handler"))
+	msgpayload, err := json.Marshal(msg)
+	if err != nil {
 		return
 	}
+	tcpRequest := typedefs.TcpMessage{
+		Sub:       "REQUEST",
+		RequestId: currentRequestId,
+		Msg:       msgpayload,
+	}
+	writer := typedefs.NewTcpMessageWriter(*conn)
+
+	err = writer.WriteMessage(&tcpRequest)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Error sending TCP request"))
+		return
+	}
+	log.Printf("Sent request to client for path: %s with request ID: %d", path, currentRequestId)
 
 	// Wait for response with timeout
 	timeout := time.After(10 * time.Second)
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(1 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
@@ -285,6 +300,7 @@ func WildRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ticker.C:
 			if response, ok := responses[int(currentRequestId)]; ok {
+
 				w.WriteHeader(response.StatusCode)
 				w.Write(response.Response)
 				delete(responses, int(currentRequestId)) // Clean up
@@ -364,4 +380,66 @@ type ResponseManager struct {
 	Requestid  int
 	Response   []byte
 	StatusCode int
+}
+
+func tcpMessageHandler(conn *net.Conn) error {
+
+	log.Printf("[%s] Handling new message from %s", (*conn).RemoteAddr())
+
+	reader := typedefs.NewTcpMessageReader(*conn)
+	writer := typedefs.NewTcpMessageWriter(*conn)
+	msg, err := reader.ReadMessage()
+	if err != nil {
+		log.Printf("[%s] Error reading message from %s: %v", (*conn).RemoteAddr(), err)
+		return err
+	}
+	switch msg.Sub {
+	case "REG":
+		var reg map[string]interface{}
+		err := json.Unmarshal(msg.Msg, &reg)
+		if err != nil {
+			log.Printf("[%s] Error unmarshalling registration message: %v", err)
+			return err
+		}
+
+		clientId, ok := reg["client_id"].(string)
+		if !ok {
+			log.Printf("[%s] Error getting client_id from registration")
+			return nil
+		}
+
+		paths, ok := reg["Paths"].([]interface{})
+		if !ok {
+			log.Printf("[%s] Error getting paths from registration")
+			return nil
+		}
+
+		log.Printf("[%s] Registering client %s with paths: %v", clientId, paths)
+		tcpmanager.Register(clientId, paths, conn)
+
+		response := typedefs.TcpMessage{
+			Sub: "REG_RESPONSE",
+			Msg: []byte("Registration successful"),
+		}
+		if err := writer.WriteMessage(&response); err != nil {
+			log.Printf("[%s] Error sending registration response: %v", err)
+			return err
+		}
+		log.Println("Registered client with id", clientId, "messege sent to client")
+
+	case "HEARTBEAT":
+		log.Printf("[%s] Received heartbeat from %s", (*conn).RemoteAddr())
+		response := typedefs.TcpMessage{
+			Sub: "HEARTBEAT_RESPONSE",
+			Msg: []byte("Heartbeat acknowledged"),
+		}
+		if err := writer.WriteMessage(&response); err != nil {
+			log.Printf("[%s] Error sending heartbeat response: %v", err)
+			return err
+		}
+
+	default:
+		log.Printf("[%s] Unknown message type: %s", msg.Sub)
+	}
+	return nil
 }
