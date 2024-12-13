@@ -36,150 +36,6 @@ func init() {
 
 }
 
-func (b *ClientBlock) Register() {
-	request := messages.RegisterRequest{
-		ClientId: uuid.New().String(),
-		Paths:    b.Paths,
-	}
-	b.ClientId = request.ClientId
-	url := fmt.Sprintf("http://%s:%d/register", b.Host, b.HTTP)
-	log.Println("Registering with server at", url)
-	jsonData, err := json.Marshal(request)
-	if err != nil {
-		fmt.Println("Error marshalling JSON:", err)
-		return
-	}
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println("Error making request:", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	fmt.Println("Response status:", resp.Status)
-	response := messages.RegisterResponse{}
-	err = json.NewDecoder(resp.Body).Decode(&response)
-	if err != nil {
-		return
-	}
-}
-
-func (b *ClientBlock) TcpConnect() {
-	log.Printf("Attempting to connect to TCP server with port: %d", b.TCP)
-	address := fmt.Sprintf("127.0.0.1:%d", b.TCP)
-	log.Printf("Using address: %s", address)
-	var conn net.Conn
-	var err error
-
-	// Function to establish a connection
-	connect := func() {
-		for {
-			log.Printf("Dialing TCP4 at address: %s", address)
-			conn, err = net.Dial("tcp4", address)
-			if err == nil {
-				log.Printf("Successfully connected to TCP server at %s", address)
-				break
-			}
-			log.Printf("Error connecting to TCP server: %v", err)
-			time.Sleep(5 * time.Second) // Wait before retrying
-		}
-	}
-
-	// Establish initial connection
-	connect()
-	defer conn.Close()
-	// create a reder and writer
-	reader := typedefs.NewTcpMessageReader(conn)
-	writer := typedefs.NewTcpMessageWriter(conn)
-
-	// Read welcome message
-	welcome, err := reader.ReadMessage()
-	if err != nil {
-		log.Printf("Error reading welcome message: %v", err)
-		return
-	}
-	log.Printf("Received welcome message: %s - %v", welcome.Sub, string(welcome.Msg))
-
-	// Send registration message
-	//b.Reg(&conn, writer)
-
-	// Handle server responses
-	for {
-		response, err := reader.ReadMessage()
-		if response == nil {
-			//log.Printf("Received nil message from server")
-			continue
-		}
-		log.Printf("Client received message type: %s", response)
-		if err != nil {
-			if err == io.EOF {
-				log.Printf("Connection closed by server")
-				//conn.Close()
-				//connect() // Reconnect
-				continue
-			}
-			log.Printf("Error reading from server: %v", err)
-
-		}
-
-		//log.Printf("Client received message type: %s", response.Sub)
-		switch response.Sub {
-		case "REQUEST":
-			log.Printf("HTTP response: %v", string(response.Msg))
-			var request map[string]interface{}
-			err := json.Unmarshal(response.Msg, &request)
-			if err != nil {
-				log.Printf("Error unmarshalling request: %v", err)
-				continue
-			}
-
-			requestid := int32(request["request_id"].(float64))
-
-			result, err := b.callbackRegistry.Execute(response.Sub, response.Msg)
-
-			if err != nil || result == nil {
-				respMsg := typedefs.TcpMessage{
-					Sub:       "ERROR",
-					Msg:       []byte(fmt.Sprintf("{\"error\": \"%v\"}", err)),
-					RequestId: requestid,
-				}
-				err := writer.WriteMessage(&respMsg)
-				if err != nil {
-					log.Printf("Error writing to TCP server: %v", err)
-
-				}
-				log.Printf("Response sent")
-				continue
-			}
-			respmsg := typedefs.TcpMessage{
-				Sub:       "RESPONSE",
-				Msg:       result,
-				RequestId: requestid,
-			}
-			err = writer.WriteMessage(&respmsg)
-			if err != nil {
-				log.Printf("Error writing to TCP server: %v", err)
-			}
-			log.Printf("Response sent")
-		case "TASK":
-			log.Printf("Received task: %v", response.Msg)
-		case "REG_RESPONSE":
-			log.Printf("Received registration response: %v", response.Msg)
-		default:
-			log.Printf("Unknown response type: %s", response.Sub)
-		}
-	}
-}
-
 func (b *ClientBlock) Process() {
 	msg := typedefs.TcpMessage{}
 	msg.Msg = json.RawMessage{}
@@ -297,4 +153,183 @@ func main() {
 	// Connect via TCP
 	block.TcpConnect()
 	block.Process()
+}
+func (b *ClientBlock) Register() {
+	request := messages.RegisterRequest{
+		ClientId: uuid.New().String(),
+		Paths:    b.Paths,
+	}
+	b.ClientId = request.ClientId
+	url := fmt.Sprintf("http://%s:%d/register", b.Host, b.HTTP)
+	log.Println("Registering with server at", url)
+	jsonData, err := json.Marshal(request)
+	if err != nil {
+		fmt.Println("Error marshalling JSON:", err)
+		return
+	}
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		fmt.Println("Error creating request:", err)
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error making request:", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	fmt.Println("Response status:", resp.Status)
+	response := messages.RegisterResponse{}
+	err = json.NewDecoder(resp.Body).Decode(&response)
+	if err != nil {
+		return
+	}
+}
+
+func (b *ClientBlock) TcpConnect() {
+	log.Printf("Attempting to connect to TCP server with port: %d", b.TCP)
+	address := fmt.Sprintf("127.0.0.1:%d", b.TCP)
+	log.Printf("Using address: %s", address)
+	var conn net.Conn
+	var err error
+
+	// Function to establish a connection
+	connect := func() {
+		for {
+			log.Printf("Dialing TCP4 at address: %s", address)
+			conn, err = net.Dial("tcp4", address)
+			if err == nil {
+				log.Printf("Successfully connected to TCP server at %s", address)
+				break
+			}
+			log.Printf("Error connecting to TCP server: %v", err)
+			time.Sleep(5 * time.Second) // Wait before retrying
+		}
+	}
+
+	// Establish initial connection
+	connect()
+	defer conn.Close()
+	// create a reder and writer
+	reader := typedefs.NewTcpMessageReader(conn)
+	writer := typedefs.NewTcpMessageWriter(conn)
+
+	// Read welcome message
+	welcome, err := reader.ReadMessage()
+	if err != nil {
+		log.Printf("Error reading welcome message: %v", err)
+		return
+	}
+	log.Printf("Received welcome message: %s - %v", welcome.Sub, string(welcome.Msg))
+
+	// Send registration message
+	b.Reg(&conn, writer)
+
+	// Handle server responses
+	for {
+		response, err := reader.ReadMessage()
+		if response == nil {
+			//log.Printf("Received nil message from server")
+			continue
+		}
+		log.Printf("Client received message type: %s", response)
+		if err != nil {
+			if err == io.EOF {
+				log.Printf("Connection closed by server")
+				//conn.Close()
+				//connect() // Reconnect
+				continue
+			}
+			log.Printf("Error reading from server: %v", err)
+
+		}
+
+		//log.Printf("Client received message type: %s", response.Sub)
+		switch response.Sub {
+		case "REQUEST":
+			log.Printf("HTTP response: %v", string(response.Msg))
+			var request map[string]interface{}
+			err := json.Unmarshal(response.Msg, &request)
+			if err != nil {
+				log.Printf("Error unmarshalling request: %v", err)
+				continue
+			}
+
+			requestid := int32(request["request_id"].(float64))
+
+			result, err := b.callbackRegistry.Execute(response.Sub, response.Msg)
+
+			if err != nil || result == nil {
+				respMsg := typedefs.TcpMessage{
+					Sub:       "ERROR",
+					Msg:       []byte(fmt.Sprintf("{\"error\": \"%v\"}", err)),
+					RequestId: requestid,
+				}
+				err := writer.WriteMessage(&respMsg)
+				if err != nil {
+					log.Printf("Error writing to TCP server: %v", err)
+
+				}
+				log.Printf("Response sent")
+				continue
+			}
+			respmsg := typedefs.TcpMessage{
+				Sub:       "RESPONSE",
+				Msg:       result,
+				RequestId: requestid,
+			}
+			err = writer.WriteMessage(&respmsg)
+			if err != nil {
+				log.Printf("Error writing to TCP server: %v", err)
+			}
+			log.Printf("Response sent")
+		case "TASK":
+			log.Printf("Received task: %v", response.Msg)
+		case "REG_RESPONSE":
+			log.Printf("Received registration response: %v", response.Msg)
+		default:
+			log.Printf("Unknown response type: %s", response.Sub)
+		}
+	}
+}
+
+// Callback for /stocks
+func stocksCallback(req typedefs.Request) interface{} {
+	// Simulate a database query to retrieve stock data
+	stockData := []map[string]interface{}{
+		{"symbol": "AAPL", "price": 150.0},
+		{"symbol": "GOOG", "price": 2500.0},
+		{"symbol": "AMZN", "price": 3000.0},
+	}
+
+	return stockData
+}
+
+// Callback for /weather
+func weatherCallback(req typedefs.Request) interface{} {
+	// Simulate a weather API call to retrieve current weather conditions
+	weatherData := map[string]interface{}{
+		"temperature": 75.0,
+		"humidity":    60.0,
+		"conditions":  "Sunny",
+	}
+
+	return weatherData
+}
+
+// Callback for /crypto
+func cryptoCallback(req typedefs.Request) interface{} {
+	// Simulate a cryptocurrency API call to retrieve current prices
+	cryptoData := []map[string]interface{}{
+		{"symbol": "BTC", "price": 50000.0},
+		{"symbol": "ETH", "price": 4000.0},
+		{"symbol": "LTC", "price": 200.0},
+	}
+
+	return cryptoData
 }
