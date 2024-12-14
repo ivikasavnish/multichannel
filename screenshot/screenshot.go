@@ -31,6 +31,7 @@ type CaptureOptions struct {
 	Height         int64      `json:"height"`
 	Scale          float64    `json:"scale"`
 	HeadlessMode   bool       `json:"headless_mode"`
+	FullPage       bool       `json:"full_page"` // New field for full page screenshot
 }
 
 // BrowserMetrics contains various metrics captured from the browser
@@ -252,11 +253,34 @@ func (sm *ScreenshotManager) CaptureMetrics(opts CaptureOptions) (*BrowserMetric
 
 	sm.ProgressChan <- Progress{Stage: "capture", Message: "Capturing screenshot..."}
 	// Capture screenshot and other metrics
-	if err := chromedp.Run(taskCtx, chromedp.Tasks{
-		chromedp.Title(&title),
-		chromedp.CaptureScreenshot(&screenshot),
-	}); err != nil {
-		return nil, fmt.Errorf("failed to capture page content: %w", err)
+	if opts.FullPage {
+		if err := chromedp.Run(taskCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			// Get page height
+			var height int64
+			if err := chromedp.Evaluate(`
+				Math.min(
+					Math.max(
+						document.documentElement.scrollHeight,
+						document.body.scrollHeight
+					),
+					window.innerHeight * 50  // Maximum 50 viewport heights
+				)
+			`, &height).Do(ctx); err != nil {
+				return err
+			}
+
+			// Take full page screenshot
+			return chromedp.FullScreenshot(&screenshot, 100).Do(ctx)
+		})); err != nil {
+			return nil, fmt.Errorf("failed to capture full page screenshot: %w", err)
+		}
+	} else {
+		if err := chromedp.Run(taskCtx, chromedp.Tasks{
+			chromedp.Title(&title),
+			chromedp.CaptureScreenshot(&screenshot),
+		}); err != nil {
+			return nil, fmt.Errorf("failed to capture page content: %w", err)
+		}
 	}
 
 	metrics.Screenshot = screenshot

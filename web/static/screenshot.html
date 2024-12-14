@@ -205,6 +205,12 @@
                                 Capture Console Logs
                             </label>
                         </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="fullPage">
+                                Full Page Screenshot (Max 50vh)
+                            </label>
+                        </div>
                         <button type="button" onclick="captureScreenshot()" class="btn btn-primary">Capture Screenshot</button>
                     </form>
                 </div>
@@ -238,6 +244,9 @@
             const headlessMode = document.getElementById('headlessMode').checked;
             const captureNetwork = document.getElementById('captureNetwork').checked;
             const captureConsole = document.getElementById('captureConsole').checked;
+            const fullPage = document.getElementById('fullPage').checked;
+
+            document.getElementById('loading').style.display = 'block';
 
             const requestData = {
                 url,
@@ -247,7 +256,8 @@
                 scale,
                 headless_mode: headlessMode,
                 capture_network: captureNetwork,
-                capture_console: captureConsole
+                capture_console: captureConsole,
+                full_page: fullPage
             };
 
             try {
@@ -282,7 +292,10 @@
 
         function displayScreenshot(result) {
             const container = document.getElementById('screenshotContainer');
-            if (result.success && result.screenshot) {
+            const networkLogs = document.getElementById('networkLogs');
+            const consoleLogs = document.getElementById('consoleLogs');
+
+            if (result && result.success && result.screenshot) {
                 // Display in main container
                 container.innerHTML = `
                     <img src="data:image/png;base64,${result.screenshot}" class="screenshot-img" alt="Screenshot">
@@ -300,8 +313,26 @@
                     >
                 `;
                 sidebar.insertBefore(thumbnailDiv, sidebar.firstChild);
+
+                // Display network logs if available
+                if (result.network_logs && result.network_logs.length > 0) {
+                    networkLogs.style.display = 'block';
+                    networkLogs.querySelector('pre').textContent = result.network_logs.join('\n');
+                } else {
+                    networkLogs.style.display = 'none';
+                }
+
+                // Display console logs if available
+                if (result.console_logs && result.console_logs.length > 0) {
+                    consoleLogs.style.display = 'block';
+                    consoleLogs.querySelector('pre').textContent = result.console_logs.join('\n');
+                } else {
+                    consoleLogs.style.display = 'none';
+                }
             } else {
                 container.innerHTML = `<div class="error">Failed to capture screenshot: ${result.error || 'Unknown error'}</div>`;
+                networkLogs.style.display = 'none';
+                consoleLogs.style.display = 'none';
             }
         }
 
