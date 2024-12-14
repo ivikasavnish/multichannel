@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screenshot Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .screenshot-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .screenshot-img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+        }
+        .controls {
+            margin-bottom: 20px;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"],
+        input[type="number"],
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .checkbox-group {
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .timestamp {
+            color: #666;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .error {
+            color: #ff0000;
+            margin-top: 10px;
+        }
+        .loading {
+            display: none;
+            margin: 20px 0;
+            font-style: italic;
+            color: #666;
+        }
+        .progress-container {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            display: none;
+        }
+        .progress-message {
+            color: #0056b3;
+            font-weight: 500;
+        }
+        .stage-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        .stage {
+            padding: 5px 15px;
+            border-radius: 15px;
+            background-color: #e9ecef;
+            color: #6c757d;
+        }
+        .stage.active {
+            background-color: #007bff;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Screenshot Viewer</h1>
+        
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-message" id="progressMessage">Initializing...</div>
+            <div class="stage-indicator">
+                <span class="stage" data-stage="navigation">Navigation</span>
+                <span class="stage" data-stage="loading">Loading</span>
+                <span class="stage" data-stage="network">Network</span>
+                <span class="stage" data-stage="capture">Capture</span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <form id="screenshotForm">
+                <div class="form-group">
+                    <label for="url">URL to capture:</label>
+                    <input type="text" id="url" name="url" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="deviceType">Device Type:</label>
+                    <select id="deviceType" name="device_type" class="form-control">
+                        <option value="desktop">Desktop</option>
+                        <option value="mobile">Mobile</option>
+                        <option value="tablet">Tablet</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="width">Width:</label>
+                    <input type="number" id="width" name="width" class="form-control" value="1920" required>
+                </div>
+                <div class="form-group">
+                    <label for="height">Height:</label>
+                    <input type="number" id="height" name="height" class="form-control" value="1080" required>
+                </div>
+                <div class="form-group">
+                    <label for="scale">Scale:</label>
+                    <input type="number" id="scale" value="1" step="0.1" min="0.1" max="2">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="headlessMode" checked>
+                        Headless Mode
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="captureNetwork">
+                        Capture Network Logs
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="captureConsole" checked>
+                        Capture Console Logs
+                    </label>
+                </div>
+                <button type="button" onclick="captureScreenshot()" class="btn btn-primary">Capture Screenshot</button>
+            </form>
+        </div>
+        <div id="loading" class="loading">Capturing screenshot...</div>
+        <div class="screenshot-container">
+            <img id="screenshotImg" class="screenshot-img" alt="Screenshot will appear here" src="">
+            <div id="timestamp" class="timestamp"></div>
+            <div id="networkLogs" style="margin-top: 20px; display: none;">
+                <h3>Network Logs</h3>
+                <pre style="background: #f5f5f5; padding: 10px; overflow-x: auto;"></pre>
+            </div>
+            <div id="consoleLogs" style="margin-top: 20px; display: none;">
+                <h3>Console Logs</h3>
+                <pre style="background: #f5f5f5; padding: 10px; overflow-x: auto;"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let autoRefreshInterval = null;
+        const REFRESH_INTERVAL = 5000; // 5 seconds
+
+        async function captureScreenshot() {
+            const url = document.getElementById('url').value;
+            const deviceType = document.getElementById('deviceType').value;
+            const width = parseInt(document.getElementById('width').value);
+            const height = parseInt(document.getElementById('height').value);
+            const scale = parseFloat(document.getElementById('scale').value);
+            const headlessMode = document.getElementById('headlessMode').checked;
+            const captureNetwork = document.getElementById('captureNetwork').checked;
+            const captureConsole = document.getElementById('captureConsole').checked;
+
+            const requestData = {
+                url,
+                device_type: deviceType,
+                width,
+                height,
+                scale,
+                headless_mode: headlessMode,
+                capture_network: captureNetwork,
+                capture_console: captureConsole
+            };
+
+            try {
+                // Start progress monitoring
+                startProgressMonitoring();
+                
+                const response = await fetch('/api/screenshot/capture', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+                
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to capture screenshot');
+                }
+                
+                displayScreenshot(result);
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to capture screenshot: ' + error.message);
+            } finally {
+                stopProgressMonitoring();
+            }
+        }
+
+        function displayScreenshot(result) {
+            const img = document.getElementById('screenshotImg');
+            const timestamp = document.getElementById('timestamp');
+            const networkLogs = document.getElementById('networkLogs');
+            const consoleLogs = document.getElementById('consoleLogs');
+
+            // Convert binary screenshot data to base64
+            const base64Screenshot = btoa(String.fromCharCode.apply(null, result.screenshot));
+            img.src = `data:image/png;base64,${base64Screenshot}`;
+            timestamp.textContent = `Last captured: ${new Date().toLocaleString()}`;
+            
+            // Update network logs if available
+            if (result.network_logs && result.network_logs.length > 0) {
+                networkLogs.style.display = 'block';
+                networkLogs.querySelector('pre').textContent = result.network_logs.join('\n');
+            } else {
+                networkLogs.style.display = 'none';
+            }
+            
+            // Update console logs if available
+            if (result.console_logs && result.console_logs.length > 0) {
+                consoleLogs.style.display = 'block';
+                consoleLogs.querySelector('pre').textContent = result.console_logs.join('\n');
+            } else {
+                consoleLogs.style.display = 'none';
+            }
+        }
+
+        let progressEventSource = null;
+
+        function startProgressMonitoring() {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressMessage = document.getElementById('progressMessage');
+            progressContainer.style.display = 'block';
+            
+            // Reset all stages
+            document.querySelectorAll('.stage').forEach(stage => {
+                stage.classList.remove('active');
+            });
+            
+            progressEventSource = new EventSource('/api/screenshot/progress');
+            
+            progressEventSource.onmessage = function(event) {
+                const progress = JSON.parse(event.data);
+                progressMessage.textContent = progress.message;
+                
+                // Update stage indicators
+                document.querySelectorAll('.stage').forEach(stage => {
+                    if (stage.dataset.stage === progress.stage) {
+                        stage.classList.add('active');
+                    }
+                });
+            };
+            
+            progressEventSource.onerror = function() {
+                stopProgressMonitoring();
+            };
+        }
+
+        function stopProgressMonitoring() {
+            if (progressEventSource) {
+                progressEventSource.close();
+                progressEventSource = null;
+            }
+            
+            const progressContainer = document.getElementById('progressContainer');
+            progressContainer.style.display = 'none';
+        }
+
+        function toggleAutoRefresh() {
+            const btn = document.getElementById('autoRefreshBtn');
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+                btn.textContent = 'Start Auto-Refresh';
+            } else {
+                autoRefreshInterval = setInterval(captureScreenshot, REFRESH_INTERVAL);
+                btn.textContent = 'Stop Auto-Refresh';
+            }
+        }
+    </script>
+</body>
+</html>

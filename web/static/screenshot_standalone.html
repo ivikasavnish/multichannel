@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Standalone Screenshot Taker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            justify-content: center;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .screenshot-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .screenshot-img {
+            max-width: 100%;
+            height: auto;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .timestamp {
+            color: #666;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+        .success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        .loading {
+            display: none;
+            margin: 20px 0;
+            color: #666;
+        }
+        .download-btn {
+            background-color: #2196F3;
+        }
+        .download-btn:hover {
+            background-color: #1976D2;
+        }
+        .auto-refresh {
+            background-color: #FF9800;
+        }
+        .auto-refresh:hover {
+            background-color: #F57C00;
+        }
+        .auto-refresh.active {
+            background-color: #F57C00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Screenshot Taker</h1>
+            <p>Take and view screenshots instantly</p>
+        </div>
+
+        <div class="controls">
+            <button onclick="captureScreenshot()" id="captureBtn">
+                📸 Take Screenshot
+            </button>
+            <button onclick="toggleAutoRefresh()" id="autoRefreshBtn" class="auto-refresh">
+                🔄 Start Auto-Refresh
+            </button>
+            <button onclick="downloadScreenshot()" id="downloadBtn" class="download-btn" disabled>
+                💾 Download
+            </button>
+        </div>
+
+        <div id="loading" class="loading">
+            📸 Capturing screenshot...
+        </div>
+
+        <div id="status" class="status"></div>
+
+        <div class="screenshot-container">
+            <img id="screenshotImg" class="screenshot-img" alt="Screenshot will appear here" src="">
+            <div id="timestamp" class="timestamp"></div>
+        </div>
+    </div>
+
+    <script>
+        let autoRefreshInterval = null;
+        let lastScreenshot = null;
+        const REFRESH_INTERVAL = 5000; // 5 seconds
+
+        async function captureScreenshot() {
+            const loading = document.getElementById('loading');
+            const status = document.getElementById('status');
+            const captureBtn = document.getElementById('captureBtn');
+            const downloadBtn = document.getElementById('downloadBtn');
+            
+            loading.style.display = 'block';
+            status.className = 'status';
+            status.textContent = '';
+            captureBtn.disabled = true;
+
+            try {
+                const response = await fetch('/screenshot');
+                if (!response.ok) {
+                    throw new Error('Failed to capture screenshot');
+                }
+
+                const data = await response.json();
+                if (data.success) {
+                    const img = document.getElementById('screenshotImg');
+                    img.src = `data:image/png;base64,${data.image}`;
+                    lastScreenshot = data.image;
+                    document.getElementById('timestamp').textContent = 
+                        `Captured: ${new Date(data.timestamp).toLocaleString()}`;
+                    status.className = 'status success';
+                    status.textContent = 'Screenshot captured successfully!';
+                    downloadBtn.disabled = false;
+                } else {
+                    throw new Error(data.error || 'Failed to capture screenshot');
+                }
+            } catch (err) {
+                status.className = 'status error';
+                status.textContent = `Error: ${err.message}`;
+                console.error('Screenshot error:', err);
+            } finally {
+                loading.style.display = 'none';
+                captureBtn.disabled = false;
+            }
+        }
+
+        function toggleAutoRefresh() {
+            const btn = document.getElementById('autoRefreshBtn');
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+                btn.textContent = '🔄 Start Auto-Refresh';
+                btn.classList.remove('active');
+            } else {
+                autoRefreshInterval = setInterval(captureScreenshot, REFRESH_INTERVAL);
+                btn.textContent = '⏹️ Stop Auto-Refresh';
+                btn.classList.add('active');
+                captureScreenshot(); // Capture immediately when starting
+            }
+        }
+
+        function downloadScreenshot() {
+            if (!lastScreenshot) return;
+            
+            const link = document.createElement('a');
+            link.href = `data:image/png;base64,${lastScreenshot}`;
+            link.download = `screenshot_${new Date().toISOString()}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Initial capture
+        captureScreenshot();
+    </script>
+</body>
+</html>

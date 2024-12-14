@@ -144,6 +144,7 @@ func main() {
 			"/weather",
 			"/crypto",
 			"/ollama",
+			"/screenshot",  // Add screenshot path
 		},
 		callbackRegistry: callbacks.NewCallbackRegistry(),
 	}
@@ -155,6 +156,7 @@ func main() {
 	block.callbackRegistry.Register("/weather", weatherCallback)
 	block.callbackRegistry.Register("/crypto", cryptoCallback)
 	block.callbackRegistry.Register("/ollama", ollamaCallback)
+	block.callbackRegistry.Register("/screenshot", callbacks.ScreenshotCallback)  // Register screenshot callback
 
 	// Register using HTTP
 	block.Register()

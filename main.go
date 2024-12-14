@@ -24,6 +24,18 @@ func init() {
 	log.SetFlags(log.LstdFlags | log.Llongfile)
 }
 
+// setupCORS adds CORS headers to the response
+func setupCORS(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+// screenshotViewerHandler serves the screenshot viewer HTML page
+func screenshotViewerHandler(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "web/static/screenshot.html")
+}
+
 var (
 	tcpmanager  = NewTCPManager()
 	serverblock = &ServerBlock{
@@ -216,10 +228,22 @@ func handleTCPMessage(conn *net.Conn) error {
 }
 
 func WildRoute(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/" {
-		// Handle the root path
+	// Add CORS headers
+	setupCORS(w)
+	
+	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Root path accessed"))
+		return
+	}
+
+	if r.URL.Path == "/" {
+		// Redirect to screenshot viewer
+		http.Redirect(w, r, "/viewer", http.StatusFound)
+		return
+	}
+
+	if r.URL.Path == "/viewer" {
+		screenshotViewerHandler(w, r)
 		return
 	}
 
