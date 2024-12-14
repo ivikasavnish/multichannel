@@ -8,8 +8,40 @@
         body {
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 0;
             background-color: #f0f0f0;
+        }
+        .layout {
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 300px;
+            background-color: white;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            overflow-y: auto;
+            height: 100vh;
+            position: fixed;
+        }
+        .main-content {
+            flex: 1;
+            margin-left: 300px;
+            padding: 20px;
+        }
+        .sidebar-image {
+            width: 100%;
+            margin-bottom: 20px;
+            cursor: pointer;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            transition: transform 0.2s;
+        }
+        .sidebar-image:hover {
+            transform: scale(1.02);
+        }
+        .sidebar-image.selected {
+            border: 2px solid #4CAF50;
         }
         .container {
             max-width: 1200px;
@@ -111,77 +143,84 @@
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Screenshot Viewer</h1>
-        
-        <div class="progress-container" id="progressContainer">
-            <div class="progress-message" id="progressMessage">Initializing...</div>
-            <div class="stage-indicator">
-                <span class="stage" data-stage="navigation">Navigation</span>
-                <span class="stage" data-stage="loading">Loading</span>
-                <span class="stage" data-stage="network">Network</span>
-                <span class="stage" data-stage="capture">Capture</span>
-            </div>
+    <div class="layout">
+        <div class="sidebar" id="screenshotSidebar">
+            <!-- Screenshots will be added here dynamically -->
         </div>
+        <div class="main-content">
+            <div class="container">
+                <h1>Screenshot Viewer</h1>
+                
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-message" id="progressMessage">Initializing...</div>
+                    <div class="stage-indicator">
+                        <span class="stage" data-stage="navigation">Navigation</span>
+                        <span class="stage" data-stage="loading">Loading</span>
+                        <span class="stage" data-stage="network">Network</span>
+                        <span class="stage" data-stage="capture">Capture</span>
+                    </div>
+                </div>
 
-        <div class="controls">
-            <form id="screenshotForm">
-                <div class="form-group">
-                    <label for="url">URL to capture:</label>
-                    <input type="text" id="url" name="url" class="form-control" required>
+                <div class="controls">
+                    <form id="screenshotForm">
+                        <div class="form-group">
+                            <label for="url">URL to capture:</label>
+                            <input type="text" id="url" name="url" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="deviceType">Device Type:</label>
+                            <select id="deviceType" name="device_type" class="form-control">
+                                <option value="desktop">Desktop</option>
+                                <option value="mobile">Mobile</option>
+                                <option value="tablet">Tablet</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="width">Width:</label>
+                            <input type="number" id="width" name="width" class="form-control" value="1920" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="height">Height:</label>
+                            <input type="number" id="height" name="height" class="form-control" value="1080" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="scale">Scale:</label>
+                            <input type="number" id="scale" value="1" step="0.1" min="0.1" max="2">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="headlessMode" checked>
+                                Headless Mode
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="captureNetwork">
+                                Capture Network Logs
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="captureConsole" checked>
+                                Capture Console Logs
+                            </label>
+                        </div>
+                        <button type="button" onclick="captureScreenshot()" class="btn btn-primary">Capture Screenshot</button>
+                    </form>
                 </div>
-                <div class="form-group">
-                    <label for="deviceType">Device Type:</label>
-                    <select id="deviceType" name="device_type" class="form-control">
-                        <option value="desktop">Desktop</option>
-                        <option value="mobile">Mobile</option>
-                        <option value="tablet">Tablet</option>
-                    </select>
+                <div id="loading" class="loading">Capturing screenshot...</div>
+                <div id="screenshotContainer" class="screenshot-container">
+                    <img id="screenshotImg" class="screenshot-img" alt="Screenshot will appear here" src="">
+                    <div id="timestamp" class="timestamp"></div>
+                    <div id="networkLogs" style="margin-top: 20px; display: none;">
+                        <h3>Network Logs</h3>
+                        <pre style="background: #f5f5f5; padding: 10px; overflow-x: auto;"></pre>
+                    </div>
+                    <div id="consoleLogs" style="margin-top: 20px; display: none;">
+                        <h3>Console Logs</h3>
+                        <pre style="background: #f5f5f5; padding: 10px; overflow-x: auto;"></pre>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="width">Width:</label>
-                    <input type="number" id="width" name="width" class="form-control" value="1920" required>
-                </div>
-                <div class="form-group">
-                    <label for="height">Height:</label>
-                    <input type="number" id="height" name="height" class="form-control" value="1080" required>
-                </div>
-                <div class="form-group">
-                    <label for="scale">Scale:</label>
-                    <input type="number" id="scale" value="1" step="0.1" min="0.1" max="2">
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="headlessMode" checked>
-                        Headless Mode
-                    </label>
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="captureNetwork">
-                        Capture Network Logs
-                    </label>
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="captureConsole" checked>
-                        Capture Console Logs
-                    </label>
-                </div>
-                <button type="button" onclick="captureScreenshot()" class="btn btn-primary">Capture Screenshot</button>
-            </form>
-        </div>
-        <div id="loading" class="loading">Capturing screenshot...</div>
-        <div class="screenshot-container">
-            <img id="screenshotImg" class="screenshot-img" alt="Screenshot will appear here" src="">
-            <div id="timestamp" class="timestamp"></div>
-            <div id="networkLogs" style="margin-top: 20px; display: none;">
-                <h3>Network Logs</h3>
-                <pre style="background: #f5f5f5; padding: 10px; overflow-x: auto;"></pre>
-            </div>
-            <div id="consoleLogs" style="margin-top: 20px; display: none;">
-                <h3>Console Logs</h3>
-                <pre style="background: #f5f5f5; padding: 10px; overflow-x: auto;"></pre>
             </div>
         </div>
     </div>
@@ -242,31 +281,45 @@
         }
 
         function displayScreenshot(result) {
-            const img = document.getElementById('screenshotImg');
-            const timestamp = document.getElementById('timestamp');
-            const networkLogs = document.getElementById('networkLogs');
-            const consoleLogs = document.getElementById('consoleLogs');
+            const container = document.getElementById('screenshotContainer');
+            if (result.success && result.screenshot) {
+                // Display in main container
+                container.innerHTML = `
+                    <img src="data:image/png;base64,${result.screenshot}" class="screenshot-img" alt="Screenshot">
+                    <div class="timestamp">Captured at: ${new Date().toLocaleString()}</div>
+                `;
+                
+                // Add to sidebar
+                const sidebar = document.getElementById('screenshotSidebar');
+                const thumbnailDiv = document.createElement('div');
+                thumbnailDiv.innerHTML = `
+                    <img src="data:image/png;base64,${result.screenshot}" 
+                         class="sidebar-image" 
+                         alt="Screenshot thumbnail"
+                         onclick="showFullImage(this)"
+                    >
+                `;
+                sidebar.insertBefore(thumbnailDiv, sidebar.firstChild);
+            } else {
+                container.innerHTML = `<div class="error">Failed to capture screenshot: ${result.error || 'Unknown error'}</div>`;
+            }
+        }
 
-            // Convert binary screenshot data to base64
-            const base64Screenshot = btoa(String.fromCharCode.apply(null, result.screenshot));
-            img.src = `data:image/png;base64,${base64Screenshot}`;
-            timestamp.textContent = `Last captured: ${new Date().toLocaleString()}`;
+        function showFullImage(img) {
+            // Remove selected class from all images
+            document.querySelectorAll('.sidebar-image').forEach(image => {
+                image.classList.remove('selected');
+            });
             
-            // Update network logs if available
-            if (result.network_logs && result.network_logs.length > 0) {
-                networkLogs.style.display = 'block';
-                networkLogs.querySelector('pre').textContent = result.network_logs.join('\n');
-            } else {
-                networkLogs.style.display = 'none';
-            }
+            // Add selected class to clicked image
+            img.classList.add('selected');
             
-            // Update console logs if available
-            if (result.console_logs && result.console_logs.length > 0) {
-                consoleLogs.style.display = 'block';
-                consoleLogs.querySelector('pre').textContent = result.console_logs.join('\n');
-            } else {
-                consoleLogs.style.display = 'none';
-            }
+            // Show in main container
+            const container = document.getElementById('screenshotContainer');
+            container.innerHTML = `
+                <img src="${img.src}" class="screenshot-img" alt="Screenshot">
+                <div class="timestamp">Captured at: ${new Date().toLocaleString()}</div>
+            `;
         }
 
         let progressEventSource = null;
