@@ -1,4 +1,4 @@
-package httplib
+package lib
 
 import (
 	"bytes"

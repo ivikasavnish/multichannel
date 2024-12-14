@@ -7,15 +7,25 @@ import (
 	"github.com/google/uuid"
 	"io"
 	"log"
+	ollama "multichannel/aiapp"
 	"multichannel/cmd/callbacks"
 	"multichannel/cmd/messages"
 	conversion "multichannel/cmd/protos"
 	"multichannel/cmd/typedefs"
 	grpcclient "multichannel/grpc/client"
+	"multichannel/http/lib"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
+
+type OllamaI struct {
+	Model  string `json:"model"`
+	Prompt string `json:"prompt"`
+	Stream bool   `json:"stream"`
+	Format string `json:"format"`
+}
 
 type ClientBlock struct {
 	Host             string
@@ -28,7 +38,9 @@ type ClientBlock struct {
 }
 
 var (
-	bytechan = make(chan []byte, 100)
+	bytechan     = make(chan []byte, 100)
+	client       = lib.NewHttpClient()
+	ollamaclient = ollama.NewClient("http://192.168.1.10:11435")
 )
 
 func init() {
@@ -131,6 +143,7 @@ func main() {
 			"/stocks",
 			"/weather",
 			"/crypto",
+			"/ollama",
 		},
 		callbackRegistry: callbacks.NewCallbackRegistry(),
 	}
@@ -141,6 +154,7 @@ func main() {
 	block.callbackRegistry.Register("/stocks", stocksCallback)
 	block.callbackRegistry.Register("/weather", weatherCallback)
 	block.callbackRegistry.Register("/crypto", cryptoCallback)
+	block.callbackRegistry.Register("/ollama", ollamaCallback)
 
 	// Register using HTTP
 	block.Register()
@@ -332,4 +346,42 @@ func cryptoCallback(req typedefs.Request) interface{} {
 	}
 
 	return cryptoData
+}
+
+func ollamaCallback(req typedefs.Request) interface{} {
+	// Simulate a cryptocurrency API call to retrieve current prices
+
+	url := "http://192.168.1.10:11435/api/generate"
+	method := "POST"
+
+	payload := strings.NewReader(` {
+    "model": "mistral:latest",
+    "prompt": "best 10 country to live in ",
+    "stream":false
+}
+`)
+
+	client := &http.Client{}
+	reqllama, err := http.NewRequest(method, url, payload)
+
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+	reqllama.Header.Add("Content-Type", "application/json")
+
+	res, err := client.Do(reqllama)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+	fmt.Println(string(body))
+	return string(body)
 }

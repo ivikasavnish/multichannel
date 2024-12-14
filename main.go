@@ -288,7 +288,7 @@ func WildRoute(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Sent request to client for path: %s with request ID: %d", path, currentRequestId)
 
 	// Wait for response with timeout
-	timeout := time.After(10 * time.Second)
+	timeout := time.After(300 * time.Second)
 	ticker := time.NewTicker(1 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -302,6 +302,7 @@ func WildRoute(w http.ResponseWriter, r *http.Request) {
 			if response, ok := responses[int(currentRequestId)]; ok {
 
 				w.WriteHeader(response.StatusCode)
+				w.Header().Set("content-type", "application/json")
 				w.Write(response.Response)
 				delete(responses, int(currentRequestId)) // Clean up
 				return
