@@ -143,7 +143,7 @@ func getDeviceSettings(deviceType DeviceType, width, height int64) map[string]in
 // CaptureMetrics captures a screenshot and page metrics based on provided options
 func (sm *ScreenshotManager) CaptureMetrics(opts CaptureOptions) (*BrowserMetrics, error) {
 	// Create a timeout context for this capture - increased timeout
-	ctx, cancel := context.WithTimeout(sm.ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(sm.ctx, 120*time.Second)
 	defer cancel()
 
 	// Create options for the browser
@@ -153,6 +153,10 @@ func (sm *ScreenshotManager) CaptureMetrics(opts CaptureOptions) (*BrowserMetric
 		chromedp.Flag("start-maximized", !opts.HeadlessMode),
 		chromedp.Flag("enable-automation", false),
 		chromedp.Flag("hide-scrollbars", false),
+		// Add additional flags for better performance
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
 	)
 
 	// Create a new ExecAllocator
@@ -216,17 +220,34 @@ func (sm *ScreenshotManager) CaptureMetrics(opts CaptureOptions) (*BrowserMetric
 
 	// Wait for the page to be ready with network idle
 	sm.ProgressChan <- Progress{Stage: "loading", Message: "Waiting for page to load..."}
+	
+	// First wait for document to be ready
 	if err := chromedp.Run(taskCtx, chromedp.Tasks{
-		chromedp.WaitReady("document", chromedp.ByQuery),
 		network.Enable(),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			sm.ProgressChan <- Progress{Stage: "network", Message: "Waiting for network to be idle..."}
-			// Wait a bit to ensure network is truly idle
-			time.Sleep(2 * time.Second)
-			return nil
-		}),
+		chromedp.WaitReady("body", chromedp.ByQuery),
 	}); err != nil {
-		return nil, fmt.Errorf("failed waiting for page to be ready: %w", err)
+		log.Printf("Warning: initial page load check failed: %v", err)
+		// Continue anyway as some pages might not trigger ready state properly
+	}
+
+	// Then wait for network to be relatively idle
+	if err := chromedp.Run(taskCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		sm.ProgressChan <- Progress{Stage: "network", Message: "Waiting for network to be idle..."}
+		
+		// Wait a shorter time for network idle
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+				// Continue waiting
+			}
+		}
+		return nil
+	})); err != nil {
+		log.Printf("Warning: network idle check failed: %v", err)
+		// Continue anyway as we might still get a good screenshot
 	}
 
 	sm.ProgressChan <- Progress{Stage: "capture", Message: "Capturing screenshot..."}
